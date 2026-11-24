@@ -1,0 +1,186 @@
+/**
+* BACKEND GOOGLE APPS SCRIPT - LMS ADMIN DASHBOARD
+* Dibuat secara otomatis untuk WebApp Blogger.
+*/
+
+
+// ==========================================
+// 1. FUNGSI SETUP DATABASE OTOMATIS
+// ==========================================
+function setupDatabase() {
+ var ss = SpreadsheetApp.getActiveSpreadsheet();
+ var id = ss.getId();
+ Logger.log("ID Spreadsheet: " + id);
+
+
+ // Daftar sheet dan header yang dibutuhkan
+ var sheetsData = {
+   "users": ["id_user", "nama", "username", "password", "role", "tanggal_daftar"],
+   "materi": ["id", "nama", "deskripsi", "thumbnail", "link"],
+   "tools": ["id", "nama", "deskripsi", "thumbnail", "link"],
+   "template": ["id", "nama", "deskripsi", "thumbnail", "link"]
+ };
+
+
+ // Iterasi dan buat sheet jika belum ada
+ for (var sheetName in sheetsData) {
+   var sheet = ss.getSheetByName(sheetName);
+   if (!sheet) {
+     sheet = ss.insertSheet(sheetName);
+     sheet.appendRow(sheetsData[sheetName]);
+     // Styling header
+     sheet.getRange(1, 1, 1, sheetsData[sheetName].length).setFontWeight("bold").setBackground("#d9ead3");
+     sheet.setFrozenRows(1);
+   }
+ }
+
+
+ // Inject User Admin Default jika sheet users kosong (hanya baris header)
+ var userSheet = ss.getSheetByName("users");
+ if (userSheet.getLastRow() === 1) {
+   var newId = "USR-" + new Date().getTime();
+   userSheet.appendRow([newId, "Administrator", "admin", "admin2026", "admin", new Date().toLocaleString()]);
+   Logger.log("Akun Admin berhasil dibuat.");
+ }
+}
+
+
+// ==========================================
+// 2. FUNGSI ROUTING UTAMA (doPost & doGet)
+// ==========================================
+function doGet(e) {
+ // Hanya fallback jika diakses langsung, pada Blogger kita gunakan doPost CORS
+ return ContentService.createTextOutput("API LMS Running. Akses dari aplikasi Blogger Anda.");
+}
+
+
+function doPost(e) {
+ // CORS Setup
+ var origin = e.parameter.origin || "*";
+  try {
+   var rawData = e.postData.contents;
+   var req = JSON.parse(rawData);
+   var action = req.action;
+   var payload = req.payload;
+   var result = { status: 'error', message: 'Action tidak ditemukan' };
+
+
+   // Router
+   switch (action) {
+     case 'login':
+       result = processLogin(payload);
+       break;
+     case 'getDashboardStats':
+       result = getDashboardStats();
+       break;
+     case 'getData':
+       result = getDataFromSheet(payload.sheetName);
+       break;
+     case 'addData':
+       result = addDataToSheet(payload.sheetName, payload.data);
+       break;
+     case 'deleteData':
+       result = deleteDataFromSheet(payload.sheetName, payload.idCol, payload.idVal);
+       break;
+   }
+
+
+   return ContentService.createTextOutput(JSON.stringify(result))
+     .setMimeType(ContentService.MimeType.JSON);
+
+
+ } catch (error) {
+   return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
+     .setMimeType(ContentService.MimeType.JSON);
+ }
+}
+
+
+// ==========================================
+// 3. LOGIKA BACKEND (CONTROLLERS)
+// ==========================================
+
+
+function processLogin(payload) {
+ var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("users");
+ var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+   if (data[i][2] == payload.username && data[i][3] == payload.password) {
+     return {
+       status: 'success',
+       user: {
+         id: data[i][0],
+         nama: data[i][1],
+         username: data[i][2],
+         role: data[i][4]
+       }
+     };
+   }
+ }
+ return { status: 'error', message: 'Username atau Password salah!' };
+}
+
+
+function getDashboardStats() {
+ var ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Fungsi aman untuk menghitung baris menghindari error jika sheet belum ada
+ var getCount = function(sheetName) {
+   var sheet = ss.getSheetByName(sheetName);
+   if (!sheet) return 0;
+   var rows = sheet.getLastRow();
+   return rows > 1 ? rows - 1 : 0;
+ };
+  return {
+   status: 'success',
+   data: {
+     materi: getCount("materi"),
+     tools: getCount("tools"),
+     template: getCount("template"),
+     users: getCount("users")
+   }
+ };
+}
+
+
+function getDataFromSheet(sheetName) {
+ var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+ if(!sheet) return { status: 'error', message: 'Sheet tidak ditemukan' };
+  var data = sheet.getDataRange().getValues();
+ var headers = data[0];
+ var resultData = [];
+  for(var i=1; i<data.length; i++){
+   var obj = {};
+   for(var j=0; j<headers.length; j++){
+     obj[headers[j]] = data[i][j];
+   }
+   resultData.push(obj);
+ }
+  return { status: 'success', data: resultData };
+}
+
+
+function addDataToSheet(sheetName, dataObj) {
+ var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+ if(!sheet) return { status: 'error', message: 'Sheet tidak ditemukan' };
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+ var rowData = [];
+  for(var i=0; i<headers.length; i++){
+   rowData.push(dataObj[headers[i]] || "");
+ }
+  sheet.appendRow(rowData);
+ return { status: 'success', message: 'Data berhasil ditambahkan' };
+}
+
+
+function deleteDataFromSheet(sheetName, idColIndex, idVal) {
+ var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+ var data = sheet.getDataRange().getValues();
+  for(var i=1; i<data.length; i++){
+   if(data[i][idColIndex] == idVal){
+     sheet.deleteRow(i + 1);
+     return { status: 'success', message: 'Data berhasil dihapus' };
+   }
+ }
+ return { status: 'error', message: 'Data tidak ditemukan' };
+}
+
